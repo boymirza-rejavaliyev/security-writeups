@@ -17,6 +17,7 @@ methodology for offensive security engagements.
 │   ├── _template.md
 │   └── lame.md
 ├── wordpress-vuln-research/   # original WordPress plugin vulnerability research
+│   ├── bookit.md
 │   ├── nd-booking.md
 │   ├── booking-package.md
 │   └── media-library-organizer.md
@@ -46,6 +47,7 @@ independently confirmed with a working PoC.
 | Plugin | Vulnerability | Class | CVE status |
 |---|---|---|---|
 | Shared Files ≤ 1.7.71 | Password-protected file download bypass | Broken Access Control | Reported to Patchstack — **in review** (write-up to follow once patched) |
+| [BookIt v2.5.1](wordpress-vuln-research/bookit.md) | Unauthenticated Stripe payment amount manipulation | CWE-20 / CWE-840 | Already fixed upstream in v2.6.0.5 before disclosure — no report filed |
 | [ND Booking ≤ 3.8](wordpress-vuln-research/nd-booking.md) | Unauthenticated permanent WooCommerce price override | CWE-20 | Reported, no CVE (below Patchstack mVDP / Wordfence install threshold) |
 | [Booking Package ≤ 1.7.28](wordpress-vuln-research/booking-package.md) | Predictable cancellation token → unauthenticated booking cancellation | CWE-330 | Reported, no CVE (below Wordfence install threshold) |
 | [Media Library Organizer ≤ 2.1.4](wordpress-vuln-research/media-library-organizer.md) | Authenticated path traversal → arbitrary `.zip` file write | CWE-22 | Reported, no CVE (extension not fully attacker-controlled) |
