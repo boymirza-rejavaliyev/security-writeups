@@ -10,6 +10,41 @@
 > Responsible disclosure notice: tested in an isolated local Docker WordPress environment only.
 > The vendor was notified before this write-up was published.
 
+## How I found this
+
+This plugin came from the same WordPress.org batch as several other booking/reservation plugins. A
+quick scan flagged one REST route registered with `permission_callback => '__return_true'` — always
+worth a second look. It turned out to be fine on its own: the route genuinely serves an anonymous,
+public booking form, and every internal `mode` it dispatches to has its own token/nonce check.
+
+That led me to enumerate every `mode` inside the public dispatcher function
+(`requestAjaxFrontEnd()`) — `sendBooking`, `cancelBookingData`, `deleteUser`, `updateUser`, and
+others. `cancelBookingData` stood out because it relies on a `(key, token)` pair — the classic
+"secret token" pattern, and if the token generation itself is weak, the whole access control
+collapses regardless of how the check is written.
+
+I confirmed the token was checked correctly against the database (a proper prepared statement — no
+SQL injection there), which meant the actual weakness had to be in **how the token is generated**.
+That led to `insertPrivateData()`:
+
+```php
+$cancellationToken = hash('ripemd160', $timeKey . $scheduleUnixTime . microtime(true));
+```
+
+This is the kind of code that looks safe at a glance — a hash function, three inputs, reasonably
+long output. The real question is never "is a hash function used," it's "are all the inputs to it
+actually secret." Tracing where `$timeKey` comes from led straight to `$_POST['timeKey']` — a
+client-supplied value used inside a security token, which is an immediate red flag. Checking the
+plugin's own front-end JS (`js/Booking_app.js`) confirmed it: `timeKey` is always set to
+`schedule.key`, the calendar time-slot's own database key — visible to every visitor browsing the
+public calendar. `$scheduleUnixTime` is equally public. Only `microtime(true)` — the exact
+millisecond the booking was created — was ever genuinely unknown.
+
+To prove this concretely rather than just asserting it, I ran the exact vulnerable formula (copied
+line-for-line from the plugin) in its own PHP runtime inside the Docker container, simulating an
+attacker who only has the two public values and a realistic few-second window on the timing —
+recovering the full token by brute force in well under a second.
+
 ## Summary
 
 Booking Package lets an anonymous customer cancel their own booking using a `cancellationToken`.

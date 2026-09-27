@@ -11,6 +11,48 @@
 > (WordPress + WooCommerce), never against a live production site. The vendor was notified before
 > this write-up was published. No PoC here targets a real, running installation.
 
+## How I found this
+
+After a previous finding in another booking plugin, I ran a quick scan across a new batch of
+booking/reservation plugins pulled from WordPress.org. One AJAX action name in ND Booking jumped
+out immediately: `nd_booking_final_price_php`. A function name with "price" in it in a booking
+plugin is exactly the kind of thing worth reading first.
+
+That first function turned out to be a dead end — it takes a price from `$_GET`, does a simple
+addition, and just `echo`s the result back for a live on-page price calculator. No order, no
+database write. But it raised the right question: *is this displayed number ever actually used for
+a real order, or is it purely cosmetic?*
+
+Searching the same file for the plugin's WooCommerce integration led to `nd_booking_woo_php()` in
+`inc/shortcodes/nd_booking_search_result.php` — registered for `wp_ajax_nopriv_`, i.e. fully
+unauthenticated. Reading it, the problem was immediate:
+
+```php
+$nd_booking_trip_price = sanitize_text_field($_GET['nd_booking_trip_price']);
+...
+$product->set_regular_price($nd_booking_trip_price);
+$product->set_price($nd_booking_trip_price);
+$product->save();
+```
+
+This isn't a session-scoped cart price — it overwrites the actual WooCommerce product and **saves
+it**, meaning it would affect every future visitor, not just the attacker's own cart.
+
+The function did have `check_ajax_referer('nd_booking_woo_nonce', ...)`, which looks like a
+safeguard at first glance. Tracing where that nonce gets created led to
+`nd_booking_shortcode_search_results()` — the plugin's own **public** search-results shortcode,
+which calls `wp_create_nonce()` unconditionally for every visitor and prints it into the page's
+JavaScript. A WordPress nonce proves the request came from the site's own pages (CSRF protection);
+it says nothing about who's making the request. Any anonymous visitor gets a fully valid one just
+by loading the public search page.
+
+Because this was the most serious finding of the batch, I built a full end-to-end PoC rather than
+stopping at static analysis: a real WooCommerce product at $500, linked to a room post, a real page
+rendering the public shortcode, a nonce scraped from that page's actual HTML with `curl` (no login,
+no cookies), and a single follow-up request that permanently rewrote the product's price in the
+database — confirmed directly against WordPress's own `wp post meta get`, not just the AJAX
+response.
+
 ## Summary
 
 ND Booking exposes a fully unauthenticated AJAX action, `nd_booking_woo_php`, that sets the

@@ -42,7 +42,9 @@ _More retired-machine and CTF write-ups coming as I complete them._
 Independent research into WordPress plugins, done in isolated local Docker environments and
 reported to vendors through responsible disclosure. Some of these did not clear the install-count
 or category thresholds required by Patchstack / Wordfence for a CVE, but every finding below was
-independently confirmed with a working PoC.
+independently confirmed with a working PoC. See
+[wordpress-vuln-research/README.md](wordpress-vuln-research/README.md) for the full methodology —
+where targets came from, how they were analyzed, and how each PoC was verified.
 
 | Plugin | Vulnerability | Class | CVE status |
 |---|---|---|---|

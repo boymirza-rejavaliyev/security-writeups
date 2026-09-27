@@ -10,6 +10,47 @@
 > Responsible disclosure notice: tested in an isolated local Docker WordPress environment only.
 > The vendor was notified before this write-up was published.
 
+## How I found this
+
+After a previous finding in a file-sharing plugin (Shared Files), I moved on to Media Library
+Organizer, which stood out for having more than ten registered REST routes — REST APIs with missing
+or inconsistent `permission_callback` / input-validation are a common and worthwhile place to spend
+time.
+
+Going through every `register_rest_route()` call in
+`class-media-library-organizer-rest.php`, almost all of them were properly guarded: a real
+capability check, plus a `validate_callback` / `sanitize_callback` on their parameters. One route
+was the exception — `/download-folder` had the capability check, but **no `args` schema at all**,
+unlike its siblings. An inconsistency like that in an otherwise careful codebase is usually worth
+chasing.
+
+Reading `download_folder()` confirmed it: `term_name` only passes through
+`sanitize_text_field()`, which doesn't strip `../`, and the resulting path goes straight into
+`ZipArchive::open()` with no `realpath()` containment check — unlike the Shared Files finding, there
+was no boundary check here at all. On paper, an Editor-level account (not even Administrator —
+just the `manage_categories` capability) should be able to write a `.zip` file anywhere the web
+server can write.
+
+The live PoC took three attempts to actually land, and I kept the failed ones because they were
+part of confirming the bug, not noise to hide:
+
+1. **First attempt** — `term_name=../../../../../../tmp/poc-traversal` returned an error about not
+   being able to create a temporary folder. Environment issue, not the vulnerability — WP_Filesystem
+   couldn't create the base uploads directory in this fresh container.
+2. **Second attempt**, after fixing that — `"No attachment added!"`. The media library was empty, and
+   the code apparently needs at least one item to proceed. Uploaded a test image and retried.
+3. **Third attempt** returned `{"success":true}` — but no file appeared anywhere on disk. Confusing,
+   until re-reading the code showed two things: `ZipArchive::close()`'s return value is never
+   checked (so "success" doesn't mean the write actually happened), and — the real bug in my own
+   payload — string concatenation meant a leading `../` was being glued onto the fixed
+   `wp-media-lib-img-export-` prefix as one literal path segment (`wp-media-lib-img-export-..`)
+   instead of forming an actual `../` traversal step, because there was no `/` between them.
+
+Once the payload started with a leading `/` (`term_name=/../../../../../../tmp/poc-traversal2`),
+that `/` came from `term_name` itself and formed a clean boundary — and the traversal worked exactly
+as the code review predicted, confirmed by finding a real `.zip` file on disk outside the
+WordPress install, verified with `file`.
+
 ## Summary
 
 The plugin registers a REST route, `POST /wp-json/mlo/download-folder`, that builds a ZIP export

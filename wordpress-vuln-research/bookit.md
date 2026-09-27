@@ -11,6 +11,32 @@
 > a live site. Before reporting anything, I always re-check the vulnerability against the latest
 > release — that check is what caught this one already being fixed.
 
+## How I found this
+
+After confirming a critical price-manipulation bug in another booking plugin (ND Booking, see
+[nd-booking.md](nd-booking.md)), I pulled the rest of the booking-plugin batch I'd downloaded from
+WordPress.org and specifically looked for anything handling money. BookIt stood out immediately —
+it ships a Stripe payment integration (`StripeConnect`), and any code that touches a payment amount
+gets read line by line, no exceptions.
+
+In `Hooks.php` I found `wp_ajax_nopriv_bookit_stripeConnect_intent_payment` — fully unauthenticated
+— wired to `Merchant::intent_payment()`. Reading that function, the amount going to Stripe came
+straight from `$_POST['total']`. `get_amount()`, the only function it passes through, just does
+currency-format conversion (decimal vs. zero-decimal currencies) — no minimum check, no comparison
+against the actual service price. Classic payment-amount tampering.
+
+I then checked whether the `check_ajax_referer('bookit_book_appointment')` nonce was a real
+barrier. Tracing it into `Nonces.php` showed it comes from `get_frontend_nonces()`, localized into
+every page carrying a `[bookit]` shortcode — meaning any anonymous visitor gets a valid nonce just
+by loading the public booking page. Same pattern as ND Booking: a nonce that proves nothing about
+who the requester is.
+
+A full Stripe charge needs a live Stripe API key, which I didn't have configured in the test
+environment. But the part that mattered — unauthenticated access, a valid nonce obtained
+anonymously, and an attacker-chosen `total` reaching the outbound Stripe call unmodified — didn't
+need one. Stripe's own error response (`"You did not provide an API key"`) is actually good
+evidence here: it proves the request got all the way to Stripe with the tampered amount intact.
+
 ## Summary
 
 BookIt exposes a fully unauthenticated AJAX action,
